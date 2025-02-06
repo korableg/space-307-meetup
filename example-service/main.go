@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"os"
 	"os/signal"
@@ -33,4 +34,8 @@ func main() {
 	}
 
 	slog.Info("bye bye")
+}
+
+func AddHandler() {
+	fmt.Println("dummy func")
 }
