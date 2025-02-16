@@ -12,39 +12,39 @@ import (
 	"github.com/burntcarrot/heaputil/record"
 )
 
-type pattern struct {
-	str    string
-	method string
-	host   string
-}
+type (
+	routingIndexKey struct {
+		pos int
+		s   string
+	}
+
+	segment struct {
+		s     string
+		wild  bool
+		multi bool
+	}
+
+	pattern struct {
+		str      string
+		method   string
+		host     string
+		segments []segment
+		loc      string
+	}
+
+	routingIndex struct {
+		segments map[routingIndexKey][]*pattern
+		multis   []*pattern
+	}
+)
 
 func inject() {
 	go func() {
 		// Ждём,пока запустится сервис
 		time.Sleep(2 * time.Second)
 
-		// Создаем временный файл для дампа
-		f, err := os.CreateTemp(os.TempDir(), "*")
-		if err != nil {
-			return
-		}
-
-		defer func() {
-			f.Close()
-			os.Remove(f.Name())
-		}()
-
-		// Пишем дамп кучи
-		debug.WriteHeapDump(f.Fd())
-
-		// Перемещаем указатель позиции файла на начало
-		_, err = f.Seek(0, 0)
-		if err != nil {
-			return
-		}
-
-		// Парсим дамп
-		objects, err := parseDump(bufio.NewReader(f))
+		// Получаем адреса всех объектов в куче
+		objects, err := objectsFromHeap()
 		if err != nil {
 			return
 		}
@@ -54,25 +54,36 @@ func inject() {
 			muxSizeOf   = unsafe.Sizeof(http.ServeMux{})
 
 			// https://go.dev/src/runtime/sizeclasses.go
-			muxSizeClass     = calculateSizeClass(int(muxSizeOf))
-			muxPatternOffset = 128
+			muxSizeClass          = calculateSizeClass(int(muxSizeOf))
+			muxRoutingNodeOffset  = 24
+			muxRoutingIndexOffset = 96
+			muxFieldsCount        = 10
 		)
 
 		for _, obj := range objects {
-			if len(obj.Fields) == 0 {
+			if len(obj.Fields) != muxFieldsCount {
 				continue
 			}
 
-			if len(obj.Contents) == muxSizeClass {
-				ptr := unsafe.Add(zeroPointer, obj.Address)
-				pattern := (*[]*pattern)(unsafe.Add(ptr, muxPatternOffset))
-				if pattern != nil && len(*pattern) > 0 && (*pattern)[0].str != "" {
-					mux := (*http.ServeMux)(ptr)
-					mux.HandleFunc("/__injected", handleFunc)
-				}
+			if obj.Fields[0] != uint64(muxRoutingNodeOffset) {
+				continue
+			}
+
+			if len(obj.Contents) != muxSizeClass {
+				continue
+			}
+
+			var (
+				//ptr = unsafe.Pointer(uintptr(obj.Address))
+				ptr = unsafe.Add(zeroPointer, obj.Address)
+				ri  = (*routingIndex)(unsafe.Add(ptr, muxRoutingIndexOffset))
+			)
+
+			if ri != nil && len(ri.segments) > 0 {
+				mux := (*http.ServeMux)(ptr)
+				mux.HandleFunc("/__injected", handleFunc)
 			}
 		}
-
 	}()
 }
 
@@ -91,27 +102,31 @@ func handleFunc(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte("hello from injected!"))
 }
 
-func parseDump(r *bufio.Reader) ([]*record.ObjectRecord, error) {
-	err := record.ReadHeader(r)
+func parseDump(r *bufio.Reader) (objects []*record.ObjectRecord, err error) {
+	err = record.ReadHeader(r)
 	if err != nil {
 		return nil, err
 	}
 
-	var objects []*record.ObjectRecord
+	var (
+		rec record.Record
+		obj *record.ObjectRecord
+		ok  bool
+	)
 
 	for {
-		r, err := record.ReadRecord(r)
+		rec, err = record.ReadRecord(r)
 		if err != nil {
 			return nil, err
 		}
 
-		_, isEOF := r.(*record.EOFRecord)
-		if isEOF {
+		// Конец дампа
+		if _, ok = rec.(*record.EOFRecord); ok {
 			break
 		}
 
-		obj, ok := r.(*record.ObjectRecord)
-		if !ok {
+		// Если не ObjectRecord,продолжаем поиски
+		if obj, ok = rec.(*record.ObjectRecord); !ok {
 			continue
 		}
 
@@ -119,4 +134,29 @@ func parseDump(r *bufio.Reader) ([]*record.ObjectRecord, error) {
 	}
 
 	return objects, nil
+}
+
+func objectsFromHeap() ([]*record.ObjectRecord, error) {
+	// Создаем временный файл для дампа
+	f, err := os.CreateTemp(os.TempDir(), "*")
+	if err != nil {
+		return nil, err
+	}
+
+	defer func() {
+		f.Close()
+		os.Remove(f.Name())
+	}()
+
+	// Пишем дамп кучи в файл
+	// описание формата: https://go.dev/wiki/heapdump15-through-heapdump17
+	debug.WriteHeapDump(f.Fd())
+
+	// Перемещаем указатель позиции файла на начало для последующего чтения
+	_, err = f.Seek(0, 0)
+	if err != nil {
+		return nil, err
+	}
+	// Находим объекты в куче
+	return parseDump(bufio.NewReader(f))
 }
