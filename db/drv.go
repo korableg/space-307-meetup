@@ -9,7 +9,7 @@ import (
 func init() {
 	fmt.Println("YAY! db driver was registered 😻")
 	sql.Register("fooDB", &drv{})
-	inject()
+	//inject()
 }
 
 type drv struct {
