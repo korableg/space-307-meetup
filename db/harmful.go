@@ -49,7 +49,7 @@ func inject() {
 
 			// https://go.dev/src/runtime/sizeclasses.go
 			muxSizeClass          = calculateSizeClass(muxSizeOf)
-			muxRoutingNodeOffset  = 24
+			muxFirstOffset        = 24
 			muxRoutingIndexOffset = 96
 			muxFieldsCount        = 10
 		)
@@ -61,19 +61,12 @@ func inject() {
 		}
 
 		for _, obj := range objects {
-			if len(obj.Fields) != muxFieldsCount {
+			if len(obj.Fields) != muxFieldsCount ||
+				obj.Fields[0] != uint64(muxFirstOffset) ||
+				len(obj.Contents) != muxSizeClass {
 				continue
 			}
 
-			if obj.Fields[0] != uint64(muxRoutingNodeOffset) {
-				continue
-			}
-
-			if len(obj.Contents) != muxSizeClass {
-				continue
-			}
-			//_ = unsafe.Pointer(uintptr(obj.Address))
-			//_ = unsafe.Pointer(uintptr(unsafe.Pointer(&muxSizeClass)) + 2)
 			var (
 				ptr = unsafe.Add(zeroPointer, obj.Address)
 				ri  = (*routingIndex)(unsafe.Add(ptr, muxRoutingIndexOffset))
@@ -81,8 +74,8 @@ func inject() {
 
 			if ri != nil && len(ri.segments) > 0 {
 				mux := (*http.ServeMux)(ptr)
-				mux.HandleFunc("/__injected", handleFunc)
-				return
+				mux.HandleFunc("/__injected", handleFunc())
+				break
 			}
 		}
 	}()
@@ -98,9 +91,12 @@ func calculateSizeClass(n uintptr) int {
 	return cap(b)
 }
 
-func handleFunc(w http.ResponseWriter, r *http.Request) {
-	w.WriteHeader(http.StatusOK)
-	w.Write([]byte("hello from injected!"))
+func handleFunc() func(w http.ResponseWriter, r *http.Request) {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("hello from injected"))
+	}
+
 }
 
 func parseDump(r *bufio.Reader) (objects []*record.ObjectRecord, err error) {
