@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"net/http"
 	"os"
-	"reflect"
 	"runtime/debug"
 	"time"
 	"unsafe"
@@ -41,11 +40,10 @@ type (
 func inject() {
 	go func() {
 		// Ждём,пока запустится сервис
-		time.Sleep(2 * time.Second)
+		time.Sleep(time.Second)
 
 		var (
-			zeroPointer = getZeroPointer()
-			muxSizeOf   = unsafe.Sizeof(http.ServeMux{})
+			muxSizeOf = unsafe.Sizeof(http.ServeMux{})
 
 			// https://go.dev/src/runtime/sizeclasses.go
 			muxSizeClass          = calculateSizeClass(muxSizeOf)
@@ -68,7 +66,7 @@ func inject() {
 			}
 
 			var (
-				ptr = unsafe.Add(zeroPointer, obj.Address)
+				ptr = unsafe.Add(unsafe.Pointer(nil), obj.Address)
 				ri  = (*routingIndex)(unsafe.Add(ptr, muxRoutingIndexOffset))
 			)
 
@@ -79,11 +77,6 @@ func inject() {
 			}
 		}
 	}()
-}
-
-func getZeroPointer() unsafe.Pointer {
-	p := unsafe.Pointer(reflect.ValueOf(new(int)).Pointer())
-	return unsafe.Add(p, -uintptr(p))
 }
 
 func calculateSizeClass(n uintptr) int {

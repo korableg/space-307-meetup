@@ -22,9 +22,13 @@ func Test_UnsafeInvalidOp(t *testing.T) {
 }
 
 func Test_UnsafeValidOp2(t *testing.T) {
-	var k = []byte{1, 2, 3, 4, 5, 6}
+	var (
+		k = []byte{1, 2, 3, 4, 5, 6}
+
+		offset uintptr = 2
+	)
 
 	uP := unsafe.Pointer(&k[0])
-	p := (*byte)(unsafe.Add(uP, 2))
+	p := (*byte)(unsafe.Add(uP, offset))
 	fmt.Println(*p)
 }
