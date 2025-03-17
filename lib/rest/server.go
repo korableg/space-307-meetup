@@ -18,7 +18,7 @@ type (
 	}
 )
 
-func New(cfg Config, hdrs ...Handler) *Server {
+func New(cfg *Config, hdrs ...Handler) *Server {
 	var (
 		mux    = http.NewServeMux()
 		health = new(health)

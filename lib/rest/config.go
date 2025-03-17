@@ -14,8 +14,8 @@ type (
 	}
 )
 
-func NewConfig() Config {
-	return Config{
+func NewConfig() *Config {
+	return &Config{
 		Address: ":9090",
 		Timeout: ConfigTimeout{
 			Handler: 5 * time.Second,

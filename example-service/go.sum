@@ -1,2 +1,6 @@
 github.com/burntcarrot/heaputil v0.0.0-20230927162808-497024fb706a h1:w1S7K4+qL19+czjhyWrgyc8QmaseY1f3mkP4YPcAdFM=
 github.com/burntcarrot/heaputil v0.0.0-20230927162808-497024fb706a/go.mod h1:LwbcObA3AsK5SN1Bet7dQjOkxuKqJ/B0iM0Qn6VdxPk=
+github.com/igrmk/treemap/v2 v2.0.1 h1:Jhy4z3yhATvYZMWCmxsnHO5NnNZBdueSzvxh6353l+0=
+github.com/igrmk/treemap/v2 v2.0.1/go.mod h1:PkTPvx+8OHS8/41jnnyVY+oVsfkaOUZGcr+sfonosd4=
+golang.org/x/exp v0.0.0-20220317015231-48e79f11773a h1:DAzrdbxsb5tXNOhMCSwF7ZdfMbW46hE9fSVO6BsmUZM=
+golang.org/x/exp v0.0.0-20220317015231-48e79f11773a/go.mod h1:lgLbSvA5ygNOMpwM/9anMpWVlVJ7Z+cHWq/eFuinpGE=
